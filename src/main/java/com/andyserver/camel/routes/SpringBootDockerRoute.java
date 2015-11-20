@@ -27,6 +27,7 @@ public class SpringBootDockerRoute extends RouteBuilder {
 		// Globally handle exceptions
 		onException(Exception.class)
 			.handled(true)
+			.log(">> EXCEPTION")
 			.to("log:com.andyserver.camel.springboot.RouteException?showAll=true")
 			.setHeader(Exchange.HTTP_RESPONSE_CODE, constant(500))
 				.setHeader(Exchange.CONTENT_TYPE, constant("text/plain"))
@@ -34,10 +35,23 @@ public class SpringBootDockerRoute extends RouteBuilder {
 
 		// Determine request type and set headers
 		from("direct:restdocker")
+		                .log(">> SETTING DOCKER HEADERS AND TYPE")
 				.choice()
 					.when(header("type").isEqualTo("images"))
 						.setHeader("dockerRequest").constant("image/list")
 						.to("direct:requestdocker")
+					.when(header("type").isEqualTo("images_history"))
+                                                .setHeader("dockerRequest").constant("image/inspect")
+                                                .to("direct:imagedocker")
+                                        .when(header("type").isEqualTo("container_create"))
+                                                .setHeader("dockerRequest").constant("container/create")
+                                                .to("direct:namedocker")
+                                        .when(header("type").isEqualTo("container_start"))
+                                                .setHeader("dockerRequest").constant("container/start")
+                                                .to("direct:containeriddocker")
+                                        .when(header("type").isEqualTo("container_start"))
+                                                .setHeader("dockerRequest").constant("container/stop")
+                                                .to("direct:containeriddocker")
 					.when(header("type").isEqualTo("containers"))
 						.setHeader("dockerRequest").constant("container/list")
 						.to("direct:requestdocker")
@@ -56,10 +70,20 @@ public class SpringBootDockerRoute extends RouteBuilder {
 		// Call Docker
 		from("direct:requestdocker")
 			.recipientList(simple("docker://${header.dockerRequest}?host={{docker.server}}&port={{docker.port}}"));
+		
+		from("direct:imagedocker")
+                .recipientList(simple("docker://${header.dockerRequest}?host={{docker.server}}&port={{docker.port}}&imageId=busybox"));
+		
+		from("direct:containeriddocker")
+                .recipientList(simple("docker://${header.dockerRequest}?host={{docker.server}}&port={{docker.port}}&containerId=af44af72b086"));
+		
+		from("direct:namedocker")
+                .recipientList(simple("docker://${header.dockerRequest}?host={{docker.server}}&port={{docker.port}}&image=busybox&name=busybox_test_"+System.currentTimeMillis()));
 
 		
 		// Listen for Docker Events and invoke websocket connection
 		from("docker://events?host={{docker.server}}&port={{docker.port}}")
+		                .log(">> DOCKER EVENT RECEIVED")
 				.log("${body}")
 				.convertBodyTo(String.class)
 				.to("ahc-ws://localhost:8080{{server.context-path}}/websocket?sendToAll=true");
